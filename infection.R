@@ -1,10 +1,13 @@
-#primary analyses (linear mixed effects and multiple linear regression)
-#adaptable for specific variables (e.g., columns #s) and file names (e.g., infections)
+#the following code is provided in a general format (e.g., predictor variables, response variables, columns #s etc.,)
+#that is readily adaptable for specific analyses
 library(tidyverse)       
-library(haven)           
-library(readxl)          
 library(data.table)
+library(ggplot2)
 library(nlme)
+library(MRPRESSO)
+library(MendelianRandomization)
+library(TwoSampleMR)
+
 
 #load predictor data
 df_a<-readRDS(file = "filename")
@@ -64,6 +67,8 @@ df2$infection  <- relevel(df2$infection, ref = "0")
 df_vars <- as.data.frame(df2)[c(00:00)]
 #standardize [if necessary]
 df2[c(00:00)] <- lapply(df2[c(00:00)], function(x) c(scale(x)))
+
+#primary analyses (linear mixed effects and multiple linear regression)
 #linear mixed effects regression models
 sink(file ="Results1.txt")
 for (j in 1: length(df_vars)){
@@ -92,3 +97,86 @@ print(confint(fit)[10,2&3])
 }
 sink(file =NULL)
 closeAllConnections()
+#add/remove covariates for specific analsyes
+#e.g., include icv for brain volume analyses, eGFR for plasma biomarker analyses etc.,
+
+#ARIC
+output <- list()
+for (i in 1:length(df_vars)){
+  var=colnames(df_vars)[i]
+  output[[var]] = list()
+  vars <- df_vars[,i]
+  fit <- glm(outcome ~ vars + age + sex + race_center + education + E4 + BMI+hyperten+smk+diabetes+eGFR
+             , data = df1, family = "binomial")
+  output[[var]]=summary(fit)$coefficients[c(2), ]
+}
+output<-as.data.frame(output)
+
+#MR
+exposure <-readRDS(file="pQTLs")
+outcome <-readRDS(file="Outcome")
+harmonized <- harmonise_data(exposure_dat = exposure,outcome_dat = outcome)  
+mr(harmonized)
+mr_presso(BetaOutcome = "beta.outcome", 
+          BetaExposure = "beta.exposure", 
+          SdOutcome = "se.outcome", 
+          SdExposure = "se.exposure", 
+          OUTLIERtest = TRUE, 
+          DISTORTIONtest = TRUE, 
+          data = harmonized, NbDistribution = 1000,  SignifThreshold = 0.05)
+
+#Figures
+ggplot(df2) +
+  geom_hline(yintercept=1.3, linetype="dashed", 
+             color = "black", size=1)+
+  geom_point(aes(x = value, y = -log10(p), colour = threshold, size = 8)) +
+  geom_text_repel(aes(x = value, y =  -log10(p), fontface = "bold",colour = threshold,  size = 10,label = ifelse(MultipleInfections ==T, GeneID,"")),
+                  box.padding = 2, max.overlaps = 1000)+
+  ggtitle("") +
+  xlab("")+
+  ylab("")+
+  theme_classic() +
+  theme(legend.position = "none")+
+  theme(axis.title.x = element_text(size=20,face = "bold", color = "black"),
+        axis.text.x = element_text(size=20,face = "bold",color = "black" ),
+        axis.title.y = element_text(size=20,face = "bold",color = "black"),
+        axis.text.y = element_text(size=20, face = "bold",color = "black"), 
+        legend.text=element_text(size=20, face = "bold", color = "black"),
+        plot.title = element_text(size=20,hjust=.5,face = "bold", color = "black"))
+
+ggplot(df2, aes(x=a, y=y, fill=value, color=labelcolors)) +
+  geom_tile(color = "black", size=.25)+ 
+  geom_text(aes(label=stars), color="black")+ 
+  scale_fill_gradient2(high = "#7b0310", low = "#2596be", mid = "white") +
+  theme_classic()+
+  xlab("")+
+  ylab("")+
+  coord_fixed(ratio = 0.8)+
+  theme(legend.position = "none")+
+  theme(axis.title.x = element_text(size=10, color = "black"),
+        axis.text.x = element_text(size=8,angle = 45, hjust=0.95,vjust=0.95, color="#2596be"),
+        axis.title.y = element_text(size=10,color = "black"),
+        axis.text.y = element_text(size=10,color = "black"), 
+        legend.text=element_text(size=10, color = "black"),
+        plot.title = element_text(size=10,hjust=.5, color = "black"))+
+  theme(text=element_text(family="sans"))
+
+ggplot(df2, aes(x=x, y=y, color=group)) +
+  geom_boxplot(width=0.8)+geom_jitter(position=position_jitter(0.2))+
+  theme_classic() +
+  theme(axis.title.x = element_text(size=16, color = "black"),
+        axis.text.x = element_text(size=16,color = "black" ),
+        axis.title.y = element_text(size=16,color = "black"),
+        axis.text.y = element_text(size=16,color = "black"), 
+        legend.text=element_text(size=16))+
+  theme(text=element_text(family="sans"))+
+  theme(legend.position = "none")
+
+ggplot(df2, aes(x = x)) +
+  geom_bar(color = "black", fill = "white") +
+  scale_x_mergelist(sep = "-") +
+  axis_combmatrix(sep = "-")+
+  theme_classic()+theme_combmatrix(combmatrix.label.text = element_text(color = "black", size=12))+
+  theme_combmatrix(combmatrix.panel.point.color.fill = "#7b0310",
+                   combmatrix.panel.line.size = 1,
+                   combmatrix.label.make_space = TRUE)
